@@ -83,14 +83,6 @@ From the bedroom to the kitchen: go straight 6 steps, then turn left   # note â†
 where are my keys?                                        # question â†’ answered aloud
 ```
 
-## Privacy: this changes the original GazeOS promise
-
-The original README said no frames leave the device. **This system does.** Each analysed frame (320 px JPEG)
-is sent to Google's Gemini API, and the text goes to ElevenLabs. A worn camera also captures bystanders and
-your home. Before real use: get consent, avoid pointing it at people who haven't agreed, review each provider's
-data terms, and note that Firebase holds your home layout and item locations (text only, never images).
-Keep `.env` and `firebase-key.json` out of git (`.gitignore` already does).
-
 ## Known limits
 
 - Gemini's distance estimates are rough and unvalidated. The prompt asks it to estimate closer when unsure.
