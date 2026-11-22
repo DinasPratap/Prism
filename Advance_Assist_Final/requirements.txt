@@ -1,0 +1,8 @@
+langgraph>=0.2
+langchain-core>=0.3
+langchain-google-genai>=2.0
+pydantic>=2
+python-dotenv>=1.0
+elevenlabs>=1.0
+firebase-admin>=6.5
+opencv-python>=4.8        # only needed for --source camera / video
