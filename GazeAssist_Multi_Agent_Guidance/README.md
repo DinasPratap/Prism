@@ -3,8 +3,6 @@
 A LangGraph system with four cooperating agents and two memories, built on the GazeAssist design
 (detect → risk → short spoken alerts). It speaks through ElevenLabs and stores house knowledge in Firebase.
 
-> **Experimental prototype, not a mobility aid.** It can miss obstacles, misjudge distances and speak late.
-> Never use it instead of a white cane, guide dog or human help, and never near traffic, stairs, platforms or water.
 
 ## The agents
 

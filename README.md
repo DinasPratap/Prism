@@ -1,186 +1,395 @@
-# 👁️ GazeOS
- 
-### Eyes are the most information-rich signal your body gives off. We built the open toolkit to read them, simulate them, and point a camera at the world for people who can't see it.
- 
-**Three Python modules, plus an Android XR glasses skeleton. Zero cloud. No camera needed to try it.**
- 
-*Built for the Samsung PRISM hackathon.*
-<!--  
-> [!WARNING]
-> **GazeAssist is an experimental prototype, not a certified mobility aid.** It can miss obstacles, misjudge distances, and speak late. It must never replace a white cane, guide dog, human assistance, or O&M training. Never use it near traffic, stairs, platforms, or water. -->
- 
-🕶️ **Glasses demo (simulated):** https://claude.ai/artifact/6PhJrtMLHWvT7RAHSiJEPc &nbsp;|&nbsp; 🎥 **Demo video:** `<link>` &nbsp;|&nbsp; 🖼️ **Slides:** `<link>` &nbsp;|&nbsp; 👥 **Team:** `<names>`
- 
+# 👁️ GazeOS — GazeAssist Multi-Agent Guidance
+
+> **GazeOS is the broader open research toolkit. Its flagship project is GazeAssist: a multi-agent, memory-enabled indoor guidance prototype that interprets a camera view, assesses risk, remembers useful home information, and delivers short spoken alerts.**
+
+**Built for the Samsung PRISM hackathon.**
+
+[Glasses demo (simulated)](https://claude.ai/artifact/6PhJrtMLHWvT7RAHSiJEPc) · **Demo video:** `<link>` · **Slides:** `<link>` · **Team:** `<names>`
+
+
+
+## 🌟 Flagship project: GazeAssist Multi-Agent Guidance
+
+GazeAssist is the main project in this repository. It extends the original detect → risk → short spoken alert workflow into a **LangGraph-based system with four cooperating agents and two memory layers**.
+
+The system is designed around a deliberate separation of responsibilities:
+
+- **Gemini Vision interprets the scene.** It receives a small, downscaled camera frame and returns structured detections, approximate left/right positions, distance estimates, room context, and visible personal items.
+- **Deterministic Python logic assesses risk.** The Path and Risk agents do not use an LLM. They apply explicit rules to available-space information, distance, time-to-collision, and stair-related conditions.
+- **A deterministic Output agent produces concise alerts.** It uses fixed wording, throttles repeated messages, and always allows higher-priority escalations through.
+- **Memory adds personal context.** A recent buffer remembers where items were last seen and which rooms were visited; permanent memory stores learned room-to-room directions and usual item locations.
+
+Only the Obstacle agent uses an LLM. A language model is useful for visual interpretation, but it should not be responsible for making a time-critical decision such as whether the user should stop. The vision call is also the slowest stage, so detection runs at approximately **1 Hz by default**.
+
+### Architecture at a glance
+
+```text
+                         ┌──────────────────────┐
+                         │ User query / command │
+                         └──────────┬───────────┘
+                                    │
+                          Is this a memory query?
+                             ┌──────┴──────┐
+                            Yes            No
+                             │              │
+                       Memory read     Camera frame
+                             │              │
+                             │       Obstacle Agent (1)
+                             │       Gemini Vision
+                             │              │
+                             └──────┬───────┘
+                                    │
+                    ┌───────────────┼────────────────┐
+                    │               │                │
+               Path Agent (2)  Risk Agent (3)   Memory operations
+               Rule-based      Rule-based       Recent + permanent
+                    │               │                │
+                    └───────────────┼────────────────┘
+                                    │
+                              Output Agent (4)
+                         Fixed wording + throttling
+                                    │
+                              ElevenLabs TTS
+                                    │
+                           Spoken guidance output
+```
+
+The Path agent, Risk agent, and relevant memory operations are designed to run in parallel after visual detection. Memory writes run in a background thread so that they do not intentionally delay an alert.
+
+### The four agents
+
+| Agent | Responsibility | Uses an LLM? |
+|---|---|---:|
+| **1. Obstacle** | Sends a small downscaled frame to Gemini and receives typed detections: object label, left/right position, approximate distance, room, and visible personal items. | **Yes — Gemini Vision** |
+| **2. Path** | Estimates free space in left, ahead, and right zones; produces a coarse directional hint; retrieves a stored room-to-room route when `--destination` is supplied. | No |
+| **3. Risk** | Assigns priority levels using distance, time-to-collision, and stair-related rules. It follows the GazeAssist risk thresholds. | No |
+| **4. Output** | Builds short fixed-wording alerts, throttles repeated messages, allows escalations through, and sends speech to ElevenLabs. | No |
+
+### Two-layer memory
+
+GazeAssist uses two bounded memory systems so that short-lived observations and stable household knowledge are handled differently.
+
+| Memory | What it stores | Location | Limits |
+|---|---|---|---|
+| **Recent buffer** | Recently visited rooms and temporary item-location observations, e.g. “keys, on the kitchen counter, 10 min ago”. | RAM, snapshotted to Firebase every 5 minutes and on exit | 30 items, 20 rooms, 6-hour expiry |
+| **Permanent memory** | Room-to-room directions and usual locations for personal items. | Firebase Firestore, with local JSON fallback | Text only |
+
+#### Memory router
+
+1. **Rules first:** clear statements such as “I put my keys on the counter” are stored in the recent buffer. Explicit route instructions are stored in permanent memory.
+2. **Gemini for ambiguous notes:** when rules cannot classify a note, Gemini performs structured classification. If no API key is configured, unclear notes are safely discarded.
+3. **Promotion:** an item observed in the same place on three separate occasions, or a room-to-room move observed twice, can be promoted from recent to permanent memory.
+4. **Reads:** “Where are my keys?” checks recent observations first and then usual locations. “How do I get to the kitchen?” searches permanent route memory from the current room.
+
+### Privacy and data handling in the multi-agent version
+
+> [!IMPORTANT]
+> **This multi-agent version changes the original GazeOS zero-cloud promise.** Analysed camera frames are sent to Google's Gemini API. Text sent for speech generation goes to ElevenLabs. Firebase stores household knowledge as text, not camera images.
+
+The implementation is designed to limit what it retains and transmits:
+
+- Only the newest camera frame is kept; there is no accumulating frame queue.
+- Frames are downscaled to 320 px and JPEG-compressed before visual analysis.
+- The image is removed from graph state after detection.
+- No LangGraph checkpointer is used, so graph history does not accumulate.
+- Recent and permanent memories are bounded.
+- The audio phrase cache is limited to 24 clips.
+- Firebase writes are limited to promotions, explicitly taught notes, and the periodic recent-buffer snapshot.
+
+A wearable camera may capture bystanders and private areas of a home. Obtain consent, avoid recording people who have not agreed, review Google's, ElevenLabs' and Firebase's current data terms, and protect credentials. Keep `.env` and `firebase-key.json` out of version control.
+
+### Multi-agent setup
+
+```bash
+cd "Final Advancement"
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+cp .env.example .env
+# Add the required API keys and configuration to .env
+
+python -m gazeassist_agents doctor
+```
+
+Audio playback requires an MP3 player such as `ffplay` (FFmpeg), `mpg123`, or macOS `afplay`. If ElevenLabs or a player is unavailable, the application falls back to an operating-system voice such as `say` or `espeak-ng`. Messages are also printed to the console.
+
+#### Firebase configuration
+
+1. Create a Firebase project and a Cloud Firestore database.
+2. Create/download a service-account key.
+3. Save it as `firebase-key.json` in the project directory.
+4. Set `FIREBASE_CREDENTIALS` in `.env`.
+5. Set `FIREBASE_USER_ID` to the intended user identifier.
+
+Data is stored below:
+
+```text
+users/{FIREBASE_USER_ID}/
+    edges
+    habits
+    meta
+```
+
+Firebase is used for permanent household knowledge and recent-buffer snapshots. If Firebase credentials are unavailable, the system can use local JSON fallback where supported.
+
+### Run the multi-agent system
+
+```bash
+# Offline checks; no API keys required
+python -m gazeassist_agents selftest
+
+# Scripted walk; no camera or API keys required
+python -m gazeassist_agents run --source mock --fast --seconds 40
+
+# Live camera with Gemini and ElevenLabs
+python -m gazeassist_agents run --source camera --interactive
+
+# Live camera and a stored destination route
+python -m gazeassist_agents run --source camera --destination kitchen
+```
+
+With `--interactive`, type notes and questions while the system runs:
+
+```text
+I put my keys on the kitchen counter
+From the bedroom to the kitchen: go straight 6 steps, then turn left
+where are my keys?
+```
+
+The first statement is a temporary item-location note; the route instruction is intended for permanent memory; the final question retrieves the remembered item location.
+
+### Current limitations of the multi-agent version
+
+- Gemini distance estimates are approximate, rough, and not validated. The prompt asks the model to estimate closer when uncertain, but this does not make the estimates safe or reliable.
+- Network and vision-call latency dominate response time. Detection runs at about 1 Hz by default.
+- If vision fails twice consecutively, the system announces that obstacle detection is unavailable and tells the user to use a cane or ask for help.
+- Object tracking matches by label and zone; it is not a full multi-object tracker.
+- Room recognition can be wrong. A room must be detected twice consecutively before it is accepted.
+- Live Gemini, ElevenLabs, and Firebase integrations have not yet been verified in the build environment. Offline tests cover logic, but live integrations still need testing with valid credentials.
+- Voice input is not implemented. Questions are currently typed.
+- Audio plays on the computer running Python. For Samsung glasses, the MP3 bytes need to be forwarded through a phone application by supplying an `on_audio=` callback to `AudioOut`.
+
 ---
- 
-## 💡 The problem
- 
-- **Eye data is powerful but locked away.** Fatigue, attention, and reading behavior all show up in blinks, fixations, and saccades. Most tools are closed, expensive, or tied to specialized hardware.
-- **Eye datasets are hard to get.** Real recordings mean consent forms, privacy risk, and weeks of labeling.
-- **Assistive scene description is hard to prototype.** Researchers need a clean, swappable pipeline (detect, estimate distance, rank risk, speak) that runs on a laptop.
-## 🚀 What we built
- 
+
+## 🧩 The broader GazeOS toolkit
+
+GazeOS is the umbrella research toolkit around GazeAssist. It contains three Python modules and an Android XR glasses integration skeleton. These components support eye analytics, synthetic data generation, and the earlier local assistive-scene pipeline.
+
 | Module | What it does |
 |---|---|
-| 🧠 **`gaze_core.py`** | Any webcam or video becomes structured eye intelligence: gaze, blinks, fixations, saccades, fatigue-style anomalies, and live events. Works with any backend that supplies 5 landmarks per eye. |
-| 🧬 **`eye_twin.py`** | A **synthetic eye digital twin**. Seeded, controllable, and fully labeled. It generates signals, schematic images, and train/val/test datasets with no real people involved. |
-| 🦯 **`gaze_assist.py`** | A real-time prototype that detects objects, estimates distance, computes time-to-collision, and speaks short alerts like *"Car approaching ahead, 2.4 meters. Stop."* |
-| 🕶️ **`GazeAssistGlasses.kt`** | An Android XR integration skeleton for Samsung's audio glasses: the risk engine ported to Kotlin, speech output, and a glasses-camera binding. **Untested on emulator or hardware.** |
- 
-> "Multi-agent" here means cooperating software components with typed contracts. They are **not** LLM agents. No video ever touches a language model.
- 
-## ✨ Why it's different
- 
-- 🔒 **Private by design.** Everything runs locally. Logs hold aggregate features only, never images. Saving raw frames takes two explicit consent flags.
-- 🔌 **Fully pluggable.** Swap the eye backend, object detector, depth model, or output channel (console, TTS, serial haptics) without touching the rest.
-- 🧪 **Closed-loop testing.** The twin feeds known ground-truth signals through the real `gaze_core` pipeline. In our run it recovered 9/9 blinks and 61/61 fixations, with gaze correlation above 0.99.
-- ⚡ **Built for real time.** Capture and inference run asynchronously and stale frames are dropped, so slow inference never builds up lag.
-- 🪂 **Graceful degradation.** If YOLO is missing it falls back to Haar, then to motion detection. A single failed component never takes down the whole app.
-- 🧾 **Radically honest.** Every limitation is documented. See [What this is not](#-what-this-is-not).
-## ⏱️ Try it in 60 seconds
- 
-Only `numpy` is required. No webcam, GPU, model weights, or internet.
- 
+| 🧠 **`gaze_core.py`** | Converts webcam or video input into structured eye analytics: gaze estimates, blinks, fixations, saccades, fatigue-style anomalies, and live events. It works with a backend that supplies five landmarks per eye. |
+| 🧬 **`eye_twin.py`** | A synthetic eye digital twin. It is seeded, controllable, and labelled; it generates signals, schematic images, and train/validation/test datasets without recording real people. |
+| 🦯 **`gaze_assist.py`** | The original local assistive prototype: detects objects, estimates distance, computes time-to-collision, and speaks short alerts. It is separate from the newer LangGraph/Gemini multi-agent implementation described above. |
+| 🕶️ **`GazeAssistGlasses.kt`** | Android XR integration skeleton: Kotlin risk-engine port, speech output, detector interface, and a CameraX analysis binding. It is not verified on an emulator or physical glasses. |
+
+**Important distinction:** the original GazeOS/GazeAssist pipeline was designed for local processing. The newer `Final Advancement` multi-agent system uses external Gemini, ElevenLabs, and optionally Firebase services. Do not describe the two configurations as having identical privacy or network behavior.
+
+### Why the toolkit is useful
+
+- **Pluggable components:** eye backend, object detector, depth model, and output channel can be changed without redesigning the whole pipeline.
+- **Synthetic testing:** the eye twin can feed known labelled signals through the eye-analytics pipeline for repeatable software checks.
+- **Real-time design:** capture and inference are asynchronous in the original pipeline, and stale frames are dropped to limit lag.
+- **Graceful degradation:** the original assistive module can fall back between detector options when optional components are unavailable.
+- **Auditable logic:** the original risk pipeline uses explicit rules and short alerts rather than asking an LLM to make the stop/go decision.
+
+---
+
+## ⏱️ Try the core toolkit in 60 seconds
+
+The basic eye-twin and analytics demos can be tried without a webcam, GPU, model weights, or internet connection. NumPy is the minimum dependency for the lightweight demo path.
+
 ```bash
-git clone <repo-url> && cd <repo>
-python3 -m venv .venv && source .venv/bin/activate
+git clone <repo-url>
+cd <repo-directory>
+
+python3 -m venv .venv
+source .venv/bin/activate
 pip install numpy
- 
-python gaze_core.py demo --seconds 20          # full eye-analytics pipeline
-python eye_twin.py preview --out artifacts/eye_preview   # see the synthetic eyes
-python eye_twin.py validate                    # twin → core closed-loop check
-python gaze_assist.py demo --seconds 30        # scripted walking scene with alerts
+
+# Eye analytics demo
+python gaze_core.py demo --seconds 20
+
+# Generate/preview synthetic eyes
+python eye_twin.py preview --out artifacts/eye_preview
+
+# Validate synthetic twin through the core pipeline
+python eye_twin.py validate
+
+# Original scripted assistive scene
+python gaze_assist.py demo --seconds 30
 ```
- 
-Run `python <module>.py selftest` on any module to verify it. All three pass with no extra hardware.
- 
-### Demo output (simulated scene)
- 
+
+Run a module's self-test to check it independently:
+
+```bash
+python gaze_core.py selftest
+python eye_twin.py selftest
+python gaze_assist.py selftest
 ```
+
+### Example simulated alerts
+
+```text
 [WARN] Chair approaching ahead, about 3 seconds.
 [STOP] Chair approaching ahead, 1.1 meters. Stop.
 [STOP] Car approaching ahead, 2.4 meters. Stop.
 [STOP] Stairs very close ahead. Stop.
 ```
- 
-*These come from a scripted simulation, not a real walk.*
- 
-## 🎬 Go live (optional)
- 
+
+> These messages come from a scripted simulation, not a real walk or a validated obstacle-detection test.
+
+---
+
+## 🎥 Optional live core toolkit
+
+The original local eye-analytics and assistive modules can be run with their optional dependencies.
+
 ```bash
 pip install opencv-python mediapipe
-mkdir -p models && curl -L -o models/face_landmarker.task \
+
+mkdir -p models
+curl -L -o models/face_landmarker.task \
   https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task
- 
+
 # Live eye analytics with preview
 python gaze_core.py run --camera 0 --model models/face_landmarker.task --display
- 
-# Assistive prototype (console + speech)
-pip install ultralytics   # optional: YOLO semantics (large download)
+
+# Original assistive prototype (console + speech)
+pip install ultralytics  # optional; large download
 python gaze_assist.py run --camera 0 --detector auto --voice --acknowledge-risks
 ```
- 
-## 🕶️ Samsung Android XR glasses
- 
-GazeAssist is a natural fit for Samsung's Android XR "intelligent eyewear": an outward camera in, short spoken alerts out. We built the path to get there and are clear about how far along it is.
- 
-### How the platform works
- 
-Per the Android XR developer docs, the first glasses are audio-only and run no standalone apps. An ordinary Android phone app projects an activity to the glasses through **Jetpack Projected**, and reaches the glasses' outward camera and audio through a projected context. The glasses camera supports one active stream, so we bind only an image-analysis use case. The SDK is still a developer preview, so APIs may change.
- 
-### What fits and what doesn't
- 
-| Module | On the glasses? | Why |
+
+The face-landmarker model is downloaded separately. The original `gaze_core.py` camera workflow and the newer Gemini-based multi-agent workflow have different data paths; consult the relevant module and configuration before running either with a camera.
+
+---
+
+## 🕶️ Samsung Android XR glasses integration
+
+GazeAssist is a natural fit for audio-first smart glasses: an outward-facing camera provides scene input, while short spoken alerts provide output. The repository includes an Android XR integration skeleton, but **the glasses integration is not yet a verified deployment**.
+
+### Platform concept
+
+The Android XR approach described by the project uses a companion Android phone application and Jetpack Projected to project an activity to the glasses. The phone-side app is intended to access the outward-facing camera and glasses audio through a projected context. The glasses camera supports one active stream, so the skeleton binds an image-analysis use case. The relevant SDK was a developer preview when this integration was written; APIs and availability may change.
+
+### What belongs on the glasses?
+
+| Component | Glasses suitability | Reason |
 |---|---|---|
-| `gaze_assist.py` | **Yes, via a port** | Outward camera plus audio matches its detect → risk → speak loop. |
-| `gaze_core.py` | **No, not as designed** | Eye analytics need a camera facing the eyes. The documented glasses camera points outward. |
-| `eye_twin.py` | **Dev tooling only** | Synthetic data and test signals. |
- 
-### What's in the repo
- 
-| File | Purpose |
+| Original `gaze_assist.py` | **Potentially, via a port** | Its outward-camera → risk → spoken-alert loop matches an audio-glasses workflow. |
+| `gaze_core.py` | **Not as designed** | Eye analytics require a camera facing the user's eyes; the documented glasses camera faces outward. |
+| `eye_twin.py` | **Development tooling** | Generates synthetic signals and test data; it is not a glasses runtime component. |
+| LangGraph multi-agent system | **Phone/companion-side processing is the intended route** | The current implementation is Python-based and relies on cloud APIs for vision and speech. |
+
+### Android integration files and verification
+
+| File/component | Purpose / status |
 |---|---|
-| `GazeAssistGlasses.kt` | Kotlin port of the risk engine (same thresholds and wording), speech throttling, a detector interface, and a CameraX analysis binding using the newest-frame-only strategy. |
-| Glasses demo page | A browser simulation of the glasses-camera walk with live risk alerts and optional voice. Linked at the top of this README. |
- 
-### Verification status (read this)
- 
-| Item | Status |
-|---|---|
-| Risk logic in the browser demo | **Runs**, on a scripted scene |
-| Kotlin risk engine | **Written, not compiled or unit-tested** |
-| Projected-context camera binding | **Skeleton with TODOs**; API names need checking against Developer Preview 4 |
-| Android XR emulator | **Not yet run** |
-| Real Samsung glasses | **Not tested** |
-| Detection accuracy, frame rate, link latency | **Unmeasured** |
- 
-**Next milestone:** compile the Kotlin, bind it to the emulator's camera, and record the result.
- 
-## 🏗️ How it works
- 
+| `GazeAssistGlasses.kt` | Kotlin port of the risk engine, alert throttling, detector interface, and CameraX newest-frame-only analysis binding. |
+| Browser glasses demo | Simulated camera walk with risk alerts and optional voice. |
+| Kotlin risk engine | Written, but not compiled or unit-tested according to the project notes. |
+| Projected-context camera binding | Skeleton with TODOs; API names need verification against the relevant Android XR SDK version. |
+| Android XR emulator | Not yet run. |
+| Physical Samsung glasses | Not tested. |
+| Detection accuracy, frame rate, and link latency | Not measured. |
+
+**Next glasses milestone:** compile the Kotlin port, connect it to the emulator camera, and record measured performance before attempting a physical-device test.
+
+For the newer multi-agent version, audio forwarding is a separate integration task: connect `AudioOut(on_audio=...)` to a phone application that can deliver the audio to the glasses.
+
+---
+
+## 🏗️ Original pipeline overview
+
+The repository contains two related but distinct pipelines.
+
+### Eye analytics and synthetic validation
+
+```text
+Camera / Video
+      │
+      ▼
+Eye landmarks ──► Gaze + Blink + Fixation
+      │                     │
+      │                     ▼
+      │                 Features
+      │                     │
+      │                     ▼
+      │              Baseline / Anomalies
+      │                     │
+      │                     ▼
+      │                   Events
+      ▲
+      │
+eye_twin ── synthetic eye signals + labels
+             (closed-loop software validation)
 ```
- Camera/Video ─► Eye landmarks ─► Gaze + Blink + Fixation ─► Features ─► Baseline ─► Anomalies ─► Events
-                                         ▲
-   eye_twin (synthetic eyes + labels) ───┘   (closed-loop validation)
- 
- Camera ─► Newest frame ─► Object detector + Depth ─► Risk engine (distance, TTC, direction)
-                                                         └─► Short spoken alert / haptic pulse
+
+### Original local assistive prototype
+
+```text
+Camera / Video
+      │
+      ▼
+Newest frame
+      │
+      ▼
+Object detector + depth estimate
+      │
+      ▼
+Risk engine
+(distance, time-to-collision, direction)
+      │
+      ├──► Short spoken alert
+      └──► Haptic output (where connected)
 ```
- 
-**Risk levels in GazeAssist**
- 
+
+### Original GazeAssist risk levels
+
 | Priority | Trigger |
 |---|---|
-| 🔴 Critical | ≤ 0.9 m, or TTC ≤ 1.6 s, or stairs ≤ 1.6 m |
-| 🟠 Warning | ≤ 1.8 m, or TTC ≤ 3.0 s |
-| 🟡 Caution | Risk score ≥ 0.22 |
- 
-**Application profiles** (same analytics, different thresholds): `generic`, `driver_monitoring`, `learning_analytics`, `screen_fatigue`, `research`.
- 
-## 🎯 Use cases
- 
-- 📚 **Learning analytics:** descriptive attention and reading metrics
-- 💻 **Screen fatigue:** blink suppression and long-fixation tracking
-- 🚗 **Driver-monitoring research:** fatigue-proxy prototyping (research only)
-- 🤖 **ML data generation:** labeled synthetic eye data with reproducible seeds
-- 🦯 **Assistive-tech research:** a modular testbed for scene-description ideas
-<!-- ## 🧭 What this is not
- 
-We would rather be trusted than impressive.
- 
-- ❌ Not a medical device, diagnostic tool, or certified driver-monitoring system
-- ❌ Not a calibrated eye tracker. Gaze is a geometric estimate until you calibrate it.
-- ❌ Not a photorealistic eye renderer. Twin images are schematic.
-- ❌ Not validated for accuracy. No detection, distance, or human gaze accuracy claims are made.
-- ❌ Not yet verified on Samsung glasses. The glasses integration is an untested skeleton plus a browser simulation.
-- ❌ Not a Gemini replacement. It does one narrow thing: deterministic, local, auditable hazard alerts.
-- ❌ Standard COCO YOLO **cannot detect doors or stairs**. Those appear only in the mock demo unless you bring a custom model.
-- ❌ The twin's validation is **circular by design**. It proves the plumbing is consistent, not that it works on real eyes. -->
-## 🔐 Privacy and safety
- 
-- Local processing only. GazeOS makes no network calls.
-- Do not use for covert monitoring, employee surveillance, or diagnosis.
-- Never judge a blind or low-vision person's attention or capability with gaze data.
-- A worn camera captures bystanders. The glasses path analyzes frames in memory only and stores no images. Keep it that way, and get consent before any recording.
-- Test assistive features only with informed participants, in a safe area, with a sighted spotter.
-## 🛣️ What's next
- 
-1. **Glasses bring-up:** compile the Kotlin port, run it on the Android XR emulator, then on real glasses, and publish measured frame rate and latency
-2. **Real validation** with consented participants, ground truth, and O&M experts
-3. **Metric depth and sensor fusion** (stereo/ToF/IMU)
-4. **Custom door, stairs, and curb detectors**
-5. **Embedded runtime** (ONNX/TFLite, quantization, watchdogs)
-6. **Photoreal twin** via a Blender asset pipeline
-7. **Co-design with blind and low-vision users**, including spatial audio and haptics
-## 🧩 Built with
- 
-Python · NumPy · OpenCV · MediaPipe Face Landmarker · Ultralytics YOLO (optional) · ONNX depth (optional) · Kotlin · Android XR SDK (Jetpack Projected) · CameraX
- 
-<!-- ## 📜 License
- 
-No license is included yet. **Add one before distributing** (e.g. MIT or Apache-2.0). Note that Ultralytics YOLO is AGPL-3.0, so check compatibility for derived work. -->
- 
+| 🔴 **Critical** | Distance ≤ 0.9 m, or TTC ≤ 1.6 s, or stairs ≤ 1.6 m |
+| 🟠 **Warning** | Distance ≤ 1.8 m, or TTC ≤ 3.0 s |
+| 🟡 **Caution** | Risk score ≥ 0.22 |
+
+These are the documented thresholds of the original GazeAssist risk engine. They should not be interpreted as validated safety thresholds or assumed to be identical to every configuration in the newer multi-agent implementation.
+
+### Application profiles
+
+The eye-analytics core supports different profiles using the same general analytics with different thresholds:
+
+- `generic`
+- `driver_monitoring`
+- `learning_analytics`
+- `screen_fatigue`
+- `research`
+
 ---
- 
+
+## 🛣️ Roadmap
+
+1. **Multi-agent live integration:** verify Gemini, ElevenLabs, and Firebase end-to-end with test credentials and documented failure handling.
+2. **Voice interaction:** add speech-to-text so users can ask questions and teach the memory system without typing.
+3. **Distance and scene validation:** compare estimates with measured ground truth in controlled environments.
+4. **Object tracking:** replace label-and-zone matching with a robust multi-object tracking method.
+5. **Route and memory evaluation:** test room recognition, route retrieval, memory promotion, expiry, and correction workflows.
+6. **Glasses bring-up:** compile the Kotlin port, run it on the Android XR emulator, then test on supported hardware and publish measured latency and frame rate.
+7. **Metric depth and sensor fusion:** investigate stereo/ToF depth and IMU integration.
+8. **Custom hazard detectors:** improve detection for doors, stairs, curbs, and other objects not reliably covered by generic models.
+9. **Embedded runtime:** explore ONNX/TFLite, quantization, and watchdogs for lower-latency on-device execution.
+10. **Human-centred validation:** co-design with blind and low-vision users, O&M experts, and accessibility researchers; evaluate spatial audio and haptics.
+
+---
+
+## 🧰 Built with
+
+**Core toolkit:** Python · NumPy · OpenCV · MediaPipe Face Landmarker · Ultralytics YOLO (optional) · ONNX depth (optional)
+
+**Multi-agent GazeAssist:** LangGraph · Google Gemini API · ElevenLabs · Firebase Firestore · Python
+
+**Wearable integration:** Kotlin · Android XR SDK / Jetpack Projected · CameraX
+
+---
+
+
 **GazeOS: build carefully, measure honestly, and never let a demo become a safety claim.**
- 
