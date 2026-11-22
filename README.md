@@ -5,9 +5,9 @@
 **Three Python modules, plus an Android XR glasses skeleton. Zero cloud. No camera needed to try it.**
  
 *Built for the Samsung PRISM hackathon.*
- 
+<!--  
 > [!WARNING]
-> **GazeAssist is an experimental prototype, not a certified mobility aid.** It can miss obstacles, misjudge distances, and speak late. It must never replace a white cane, guide dog, human assistance, or O&M training. Never use it near traffic, stairs, platforms, or water.
+> **GazeAssist is an experimental prototype, not a certified mobility aid.** It can miss obstacles, misjudge distances, and speak late. It must never replace a white cane, guide dog, human assistance, or O&M training. Never use it near traffic, stairs, platforms, or water. -->
  
 🕶️ **Glasses demo (simulated):** https://claude.ai/artifact/6PhJrtMLHWvT7RAHSiJEPc &nbsp;|&nbsp; 🎥 **Demo video:** `<link>` &nbsp;|&nbsp; 🖼️ **Slides:** `<link>` &nbsp;|&nbsp; 👥 **Team:** `<names>`
  
