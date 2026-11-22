@@ -2,9 +2,14 @@
  
 ### Eyes are the most information-rich signal your body gives off. We built the open toolkit to read them, simulate them, and point a camera at the world for people who can't see it.
  
-**Three Python modules. Zero cloud. No camera needed to try it.**
+**Three Python modules, plus an Android XR glasses skeleton. Zero cloud. No camera needed to try it.**
  
-🎥 **Demo video:** `<link>` &nbsp;|&nbsp; 🖼️ **Slides:** `<link>` &nbsp;|&nbsp; 👥 **Team:** `<names>`
+*Built for the Samsung PRISM hackathon.*
+ 
+> [!WARNING]
+> **GazeAssist is an experimental prototype, not a certified mobility aid.** It can miss obstacles, misjudge distances, and speak late. It must never replace a white cane, guide dog, human assistance, or O&M training. Never use it near traffic, stairs, platforms, or water.
+ 
+🕶️ **Glasses demo (simulated):** https://claude.ai/artifact/6PhJrtMLHWvT7RAHSiJEPc &nbsp;|&nbsp; 🎥 **Demo video:** `<link>` &nbsp;|&nbsp; 🖼️ **Slides:** `<link>` &nbsp;|&nbsp; 👥 **Team:** `<names>`
  
 ---
  
@@ -20,6 +25,7 @@
 | 🧠 **`gaze_core.py`** | Any webcam or video becomes structured eye intelligence: gaze, blinks, fixations, saccades, fatigue-style anomalies, and live events. Works with any backend that supplies 5 landmarks per eye. |
 | 🧬 **`eye_twin.py`** | A **synthetic eye digital twin**. Seeded, controllable, and fully labeled. It generates signals, schematic images, and train/val/test datasets with no real people involved. |
 | 🦯 **`gaze_assist.py`** | A real-time prototype that detects objects, estimates distance, computes time-to-collision, and speaks short alerts like *"Car approaching ahead, 2.4 meters. Stop."* |
+| 🕶️ **`GazeAssistGlasses.kt`** | An Android XR integration skeleton for Samsung's audio glasses: the risk engine ported to Kotlin, speech output, and a glasses-camera binding. **Untested on emulator or hardware.** |
  
 > "Multi-agent" here means cooperating software components with typed contracts. They are **not** LLM agents. No video ever touches a language model.
  
@@ -74,6 +80,42 @@ pip install ultralytics   # optional: YOLO semantics (large download)
 python gaze_assist.py run --camera 0 --detector auto --voice --acknowledge-risks
 ```
  
+## 🕶️ Samsung Android XR glasses
+ 
+GazeAssist is a natural fit for Samsung's Android XR "intelligent eyewear": an outward camera in, short spoken alerts out. We built the path to get there and are clear about how far along it is.
+ 
+### How the platform works
+ 
+Per the Android XR developer docs, the first glasses are audio-only and run no standalone apps. An ordinary Android phone app projects an activity to the glasses through **Jetpack Projected**, and reaches the glasses' outward camera and audio through a projected context. The glasses camera supports one active stream, so we bind only an image-analysis use case. The SDK is still a developer preview, so APIs may change.
+ 
+### What fits and what doesn't
+ 
+| Module | On the glasses? | Why |
+|---|---|---|
+| `gaze_assist.py` | **Yes, via a port** | Outward camera plus audio matches its detect → risk → speak loop. |
+| `gaze_core.py` | **No, not as designed** | Eye analytics need a camera facing the eyes. The documented glasses camera points outward. |
+| `eye_twin.py` | **Dev tooling only** | Synthetic data and test signals. |
+ 
+### What's in the repo
+ 
+| File | Purpose |
+|---|---|
+| `GazeAssistGlasses.kt` | Kotlin port of the risk engine (same thresholds and wording), speech throttling, a detector interface, and a CameraX analysis binding using the newest-frame-only strategy. |
+| Glasses demo page | A browser simulation of the glasses-camera walk with live risk alerts and optional voice. Linked at the top of this README. |
+ 
+### Verification status (read this)
+ 
+| Item | Status |
+|---|---|
+| Risk logic in the browser demo | **Runs**, on a scripted scene |
+| Kotlin risk engine | **Written, not compiled or unit-tested** |
+| Projected-context camera binding | **Skeleton with TODOs**; API names need checking against Developer Preview 4 |
+| Android XR emulator | **Not yet run** |
+| Real Samsung glasses | **Not tested** |
+| Detection accuracy, frame rate, link latency | **Unmeasured** |
+ 
+**Next milestone:** compile the Kotlin, bind it to the emulator's camera, and record the result.
+ 
 ## 🏗️ How it works
  
 ```
@@ -102,7 +144,7 @@ python gaze_assist.py run --camera 0 --detector auto --voice --acknowledge-risks
 - 🚗 **Driver-monitoring research:** fatigue-proxy prototyping (research only)
 - 🤖 **ML data generation:** labeled synthetic eye data with reproducible seeds
 - 🦯 **Assistive-tech research:** a modular testbed for scene-description ideas
-## 🧭 What this is not
+<!-- ## 🧭 What this is not
  
 We would rather be trusted than impressive.
  
@@ -110,29 +152,33 @@ We would rather be trusted than impressive.
 - ❌ Not a calibrated eye tracker. Gaze is a geometric estimate until you calibrate it.
 - ❌ Not a photorealistic eye renderer. Twin images are schematic.
 - ❌ Not validated for accuracy. No detection, distance, or human gaze accuracy claims are made.
+- ❌ Not yet verified on Samsung glasses. The glasses integration is an untested skeleton plus a browser simulation.
+- ❌ Not a Gemini replacement. It does one narrow thing: deterministic, local, auditable hazard alerts.
 - ❌ Standard COCO YOLO **cannot detect doors or stairs**. Those appear only in the mock demo unless you bring a custom model.
-- ❌ The twin's validation is **circular by design**. It proves the plumbing is consistent, not that it works on real eyes.
+- ❌ The twin's validation is **circular by design**. It proves the plumbing is consistent, not that it works on real eyes. -->
 ## 🔐 Privacy and safety
  
 - Local processing only. GazeOS makes no network calls.
 - Do not use for covert monitoring, employee surveillance, or diagnosis.
 - Never judge a blind or low-vision person's attention or capability with gaze data.
+- A worn camera captures bystanders. The glasses path analyzes frames in memory only and stores no images. Keep it that way, and get consent before any recording.
 - Test assistive features only with informed participants, in a safe area, with a sighted spotter.
 ## 🛣️ What's next
  
-1. **Real validation** with consented participants, ground truth, and O&M experts
-2. **Metric depth and sensor fusion** (stereo/ToF/IMU)
-3. **Custom door, stairs, and curb detectors**
-4. **Embedded runtime** (ONNX/TFLite, quantization, watchdogs)
-5. **Photoreal twin** via a Blender asset pipeline
-6. **Co-design with blind and low-vision users**, including spatial audio and haptics
+1. **Glasses bring-up:** compile the Kotlin port, run it on the Android XR emulator, then on real glasses, and publish measured frame rate and latency
+2. **Real validation** with consented participants, ground truth, and O&M experts
+3. **Metric depth and sensor fusion** (stereo/ToF/IMU)
+4. **Custom door, stairs, and curb detectors**
+5. **Embedded runtime** (ONNX/TFLite, quantization, watchdogs)
+6. **Photoreal twin** via a Blender asset pipeline
+7. **Co-design with blind and low-vision users**, including spatial audio and haptics
 ## 🧩 Built with
  
-Python · NumPy · OpenCV · MediaPipe Face Landmarker · Ultralytics YOLO (optional) · ONNX depth (optional)
+Python · NumPy · OpenCV · MediaPipe Face Landmarker · Ultralytics YOLO (optional) · ONNX depth (optional) · Kotlin · Android XR SDK (Jetpack Projected) · CameraX
  
-## 📜 License
+<!-- ## 📜 License
  
-No license is included yet. **Add one before distributing** (e.g. MIT or Apache-2.0). Note that Ultralytics YOLO is AGPL-3.0, so check compatibility for derived work.
+No license is included yet. **Add one before distributing** (e.g. MIT or Apache-2.0). Note that Ultralytics YOLO is AGPL-3.0, so check compatibility for derived work. -->
  
 ---
  
