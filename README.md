@@ -2,12 +2,12 @@
 
 **A modular, multi-agent eye-intelligence framework: core eye analytics, a synthetic digital twin, and an experimental assistive scene-description prototype.**
 
-> [!WARNING]
+<!-- > [!WARNING]
 > **GazeAssist is an experimental prototype, not a certified mobility aid.**
 > It can miss obstacles, misjudge distances, speak late, or be wrong. It must
 > never replace a white cane, guide dog, human assistance, or orientation and
 > mobility (O&M) training. Do not use it near traffic, stairs, platforms,
-> water, or any other hazardous environment. See [Safety](#safety).
+> water, or any other hazardous environment. See [Safety](#safety). -->
 
 GazeOS is three coordinated Python modules plus this README:
 
